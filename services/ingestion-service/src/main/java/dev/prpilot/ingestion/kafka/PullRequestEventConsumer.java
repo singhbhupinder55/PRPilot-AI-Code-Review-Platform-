@@ -1,6 +1,8 @@
 package dev.prpilot.ingestion.kafka;
 
 import dev.prpilot.ingestion.chunking.CodeChunker;
+import dev.prpilot.ingestion.embedding.VectorFormat;
+import dev.prpilot.ingestion.embedding.VoyageEmbeddingService;
 import dev.prpilot.ingestion.git.RepoCloner;
 import dev.prpilot.ingestion.model.CodeChunk;
 import dev.prpilot.ingestion.model.PullRequestEvent;
@@ -21,6 +23,7 @@ public class PullRequestEventConsumer {
     private final RepoCloner repoCloner;
     private final CodeChunker codeChunker;
     private final CodeChunkRepository codeChunkRepository;
+    private final VoyageEmbeddingService embeddingService;
 
     @KafkaListener(topics = "${prpilot.kafka.topics.pr-events}", groupId = "${spring.kafka.consumer.group-id}")
     public void onPullRequestEvent(PullRequestEvent event) {
@@ -43,18 +46,34 @@ public class PullRequestEventConsumer {
                             .build())
                     .toList();
 
-            codeChunkRepository.saveAll(entities);
-
+            List<CodeChunk> saved = codeChunkRepository.saveAll(entities);
             log.info("Persisted {} chunks for {} @ {}",
-                    entities.size(), event.repoFullName(), event.headSha());
+                    saved.size(), event.repoFullName(), event.headSha());
+
+            embedAndStore(saved);
 
         } catch (Exception e) {
             log.error("Failed to process event delivery={}", event.deliveryId(), e);
-            // TODO: dead-letter queue for failed events — v2 improvement
         } finally {
             if (repoDir != null) {
                 repoCloner.cleanup(repoDir);
             }
         }
+    }
+
+    private void embedAndStore(List<CodeChunk> chunks) {
+        if (chunks.isEmpty()) {
+            return;
+        }
+
+        List<String> texts = chunks.stream().map(CodeChunk::getContent).toList();
+        List<float[]> embeddings = embeddingService.embed(texts);
+
+        for (int i = 0; i < chunks.size(); i++) {
+            String literal = VectorFormat.toLiteral(embeddings.get(i));
+            codeChunkRepository.updateEmbedding(chunks.get(i).getId(), literal);
+        }
+
+        log.info("Embedded and stored {} vectors", chunks.size());
     }
 }

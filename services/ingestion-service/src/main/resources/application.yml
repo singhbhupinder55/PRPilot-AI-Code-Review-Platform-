@@ -36,6 +36,12 @@ prpilot:
     topics:
       pr-events: pr.events
 
+voyage:
+  api-key: ${VOYAGE_API_KEY}
+  api-url: https://api.voyageai.com/v1/embeddings
+  model: voyage-code-2
+  batch-size: 16
+
 management:
   endpoints:
     web:
