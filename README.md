@@ -13,15 +13,16 @@ back to the PR — built as a Kafka-backed microservices system.
 | Service | Status |
 |---|---|
 | `webhook-service` | ✅ Built — receives GitHub PR webhooks, verifies HMAC-SHA256 signatures, publishes events to Kafka |
-| `ingestion-service` | ✅ Built — consumes PR events, clones repos, chunks source code, persists chunks to Postgres |
+| `ingestion-service` | ✅ Built — consumes PR events, clones repos, chunks source code, generates embeddings, persists to Postgres + pgvector |
 | `review-service` | ⏳ Planned — RAG retrieval + Claude-powered PR review |
 | `notification-service` | ⏳ Planned — posts review comments back to GitHub |
 | `api-gateway` | ⏳ Planned |
 | `frontend` | ⏳ Planned — React dashboard |
 
-**Currently missing from ingestion-service:** embeddings are not yet generated —
-chunks are stored with `embedding = NULL`. Wiring up a real embedding model and
-backfilling existing chunks is the next milestone.
+**Ingestion pipeline is fully working end-to-end**, verified against a real
+GitHub repo: real chunks embedded via Voyage AI's `voyage-code-2` model, with
+cosine similarity search via pgvector correctly clustering semantically
+related files (no filename or metadata hints used).
 
 ## Architecture
 
@@ -29,23 +30,29 @@ backfilling existing chunks is the next milestone.
 GitHub PR event
       │
       ▼
-webhook-service ──► Kafka (pr.events) ──► ingestion-service ──► Postgres + pgvector
-                                                                       │
-                                                                       ▼
-                                                            review-service (Claude + RAG)
-                                                                       │
-                                                                       ▼
-                                                            notification-service ──► GitHub PR comment
+webhook-service ──► Kafka (pr.events) ──► ingestion-service
+                                                │
+                                  clone repo → chunk code → embed (Voyage AI)
+                                                │
+                                                ▼
+                                     Postgres + pgvector (code_chunks)
+                                                │
+                                                ▼
+                                     review-service (Claude + RAG retrieval)
+                                                │
+                                                ▼
+                                     notification-service ──► GitHub PR comment
 ```
 
 ## Tech stack
 
 - **Backend:** Java 21, Spring Boot 3.5
 - **Messaging:** Apache Kafka
-- **Data:** PostgreSQL + pgvector, Redis
+- **Data:** PostgreSQL + pgvector (HNSW index, cosine similarity), Redis
 - **Schema migrations:** Flyway
 - **Repo cloning:** JGit (pure-Java Git client, shallow clones)
-- **AI:** Claude API (Anthropic) — embeddings provider TBD
+- **Embeddings:** Voyage AI (`voyage-code-2`, 1536-dim, code-specialized)
+- **AI review (planned):** Claude API (Anthropic)
 - **Frontend (planned):** React, TypeScript
 - **Infra:** Docker Compose (local), GitHub Actions (CI)
 
@@ -82,17 +89,19 @@ cd services/webhook-service
 
 ## ingestion-service
 
-Kafka consumer that turns a PR event into searchable code context.
+Kafka consumer that turns a PR event into searchable, embedded code context.
 
 - Consumes `pr.events` via `@KafkaListener`, using `ErrorHandlingDeserializer`
   so a malformed message can't take down the consumer or loop indefinitely
 - Shallow-clones the target repo with JGit (depth=1, no full history)
 - Chunks source files into fixed-size, line-based segments (baseline strategy;
   AST-aware chunking is a planned improvement)
-- Persists chunks to Postgres via Spring Data JPA, with the schema managed by
-  Flyway (`ddl-auto: validate` — no auto-DDL in any environment)
-- `code_chunks` table includes a pgvector `vector(1024)` column with an HNSW
-  index for approximate nearest-neighbor search, ready for embeddings
+- Persists chunks to Postgres via Spring Data JPA, schema managed by Flyway
+  (`ddl-auto: validate` — no auto-DDL in any environment)
+- Generates embeddings via Voyage AI's `voyage-code-2` model, batched for
+  efficiency with exponential backoff retry on rate limits
+- Stores 1536-dim vectors in a pgvector column with an HNSW index, enabling
+  fast approximate nearest-neighbor similarity search
 
 ```bash
 cd services/ingestion-service
