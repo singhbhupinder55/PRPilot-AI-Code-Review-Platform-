@@ -5,6 +5,7 @@ analyzes the diff using RAG over the codebase, and posts review comments
 back to the PR — built as a Kafka-backed microservices system.
 
 [![webhook-service CI](https://github.com/singhbhupinder55/PRPilot-AI-Code-Review-Platform/actions/workflows/webhook-service-ci.yml/badge.svg)](https://github.com/singhbhupinder55/PRPilot-AI-Code-Review-Platform/actions/workflows/webhook-service-ci.yml)
+[![ingestion-service CI](https://github.com/singhbhupinder55/PRPilot-AI-Code-Review-Platform/actions/workflows/ingestion-service-ci.yml/badge.svg)](https://github.com/singhbhupinder55/PRPilot-AI-Code-Review-Platform/actions/workflows/ingestion-service-ci.yml)
 
 ## Status
 
@@ -102,10 +103,12 @@ Kafka consumer that turns a PR event into searchable, embedded code context.
   efficiency with exponential backoff retry on rate limits
 - Stores 1536-dim vectors in a pgvector column with an HNSW index, enabling
   fast approximate nearest-neighbor similarity search
+- Tested with 10 unit tests covering chunk boundary math, file filtering,
+  and graceful handling of unreadable files
 
 ```bash
 cd services/ingestion-service
-./gradlew build       # run build + tests
+./gradlew test       # run all tests
 ./gradlew bootRun     # start the service on :8082
 ```
 
