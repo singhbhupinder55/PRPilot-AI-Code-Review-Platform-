@@ -1,0 +1,49 @@
+name: ingestion-service CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/ingestion-service/**'
+      - '.github/workflows/ingestion-service-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/ingestion-service/**'
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/ingestion-service
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Build and run tests
+        run: ./gradlew build
+        env:
+          VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ingestion-service-test-report
+          path: services/ingestion-service/build/reports/tests/test/
+          retention-days: 14
