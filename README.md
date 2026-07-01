@@ -13,8 +13,34 @@ back to the PR — built as a Kafka-backed microservices system.
 
 **Webhook endpoint:** `https://prpilot-ai-code-review-platform-production.up.railway.app/webhooks/github`
 
-To see PRPilot in action: open a pull request on any connected GitHub repo —
-Claude will automatically post a code review comment within ~30 seconds.
+Open a pull request on any connected GitHub repo — Claude will automatically
+post a structured code review comment within ~30 seconds.
+
+## How to connect your own GitHub repo
+
+Want PRPilot to review PRs on your repo? Three steps:
+
+**1. Go to your repo's webhook settings**
+
+`github.com/YOUR_USERNAME/YOUR_REPO` → Settings → Webhooks → Add webhook
+
+**2. Fill in the webhook form**
+
+| Field | Value |
+|---|---|
+| Payload URL | `https://prpilot-ai-code-review-platform-production.up.railway.app/webhooks/github` |
+| Content type | `application/json` |
+| Secret | Contact the repo owner for the webhook secret |
+| Events | Select "Let me select individual events" → check **Pull requests** only |
+
+**3. Open a pull request**
+
+That's it. The next time you open a PR on that repo, PRPilot will automatically
+clone the repo, analyze the codebase using semantic search, and post a
+Claude-generated review comment on your PR.
+
+> **Note:** PRPilot works best on public repos. Private repos require
+> additional GitHub App configuration not included in this v1 deployment.
 
 ## Status
 
@@ -22,11 +48,11 @@ Claude will automatically post a code review comment within ~30 seconds.
 
 | Service | Status |
 |---|---|
-| `webhook-service` | ✅ Live on Railway — receives GitHub PR webhooks, HMAC-SHA256 verified |
-| `ingestion-service` | ✅ Live on Railway — clones repos, chunks code, generates embeddings |
-| `review-service` | ✅ Live on Railway — RAG retrieval + Claude-powered review |
-| `notification-service` | ✅ Live on Railway — posts review comments back to GitHub PRs |
-| `frontend` | ⏳ Planned — React dashboard |
+| `webhook-service` | ✅ Live — receives GitHub PR webhooks, HMAC-SHA256 verified |
+| `ingestion-service` | ✅ Live — clones repos, chunks code, generates embeddings |
+| `review-service` | ✅ Live — RAG retrieval + Claude-powered review |
+| `notification-service` | ✅ Live — posts review comments back to GitHub PRs |
+| `frontend` | ⏳ Planned — React dashboard showing review history |
 
 ## Architecture
 
@@ -76,7 +102,7 @@ Requires Docker, Java 21, Gradle, and env vars in `~/.zshrc`:
 ```bash
 export VOYAGE_API_KEY="your-voyage-key"
 export ANTHROPIC_API_KEY="your-anthropic-key"
-export GITHUB_TOKEN_PRPILOT="your-github-pat"
+export GITHUB_TOKEN_PRPILOT="your-github-pat"   # repo scope
 ```
 
 Start infrastructure:
@@ -92,6 +118,20 @@ cd services/webhook-service      && ./gradlew bootRun   # :8081
 cd services/ingestion-service    && ./gradlew bootRun   # :8082
 cd services/review-service       && ./gradlew bootRun   # :8083
 cd services/notification-service && ./gradlew bootRun   # :8084
+```
+
+Simulate a GitHub webhook locally:
+
+```bash
+SECRET="dev-secret-change-me"
+BODY='{"action":"opened","pull_request":{"number":1,"title":"Your PR title","user":{"login":"your-username"},"head":{"sha":"abc123","ref":"feature/branch"},"base":{"ref":"main"},"html_url":"https://github.com/your/repo/pull/1"},"repository":{"full_name":"your/repo"}}'
+SIGNATURE="sha256=$(echo -n "$BODY" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $2}')"
+curl -i -X POST http://localhost:8081/webhooks/github \
+  -H "Content-Type: application/json" \
+  -H "X-GitHub-Event: pull_request" \
+  -H "X-GitHub-Delivery: test-001" \
+  -H "X-Hub-Signature-256: $SIGNATURE" \
+  -d "$BODY"
 ```
 
 ## Services
@@ -132,7 +172,7 @@ cd services/notification-service && ./gradlew bootRun   # :8084
 | Component | Provider | Notes |
 |---|---|---|
 | 4 Spring Boot services | Railway (Hobby) | Auto-deploy from GitHub |
-| Postgres + pgvector | Neon | Serverless, pgvector enabled |
+| Postgres + pgvector | Neon | Serverless, free tier, pgvector enabled |
 | Kafka | Confluent Cloud | `pr.events` (3 partitions), `reviews.completed` (1 partition) |
 | Embeddings | Voyage AI | `voyage-code-2`, 1536-dim |
 | AI review | Anthropic | `claude-haiku-4-5` |
